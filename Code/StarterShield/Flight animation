@@ -1,0 +1,97 @@
+import numpy as np
+import open3d as o3d
+import matplotlib.pyplot as plt
+import plotly.graph_objects as go
+import trimesh
+from scipy.spatial.transform import Rotation as R
+
+# Load LiDAR data (XYZ coordinates, assume it's a txt or csv file)
+data = np.loadtxt('lidar_data.txt')  # Or use np.genfromtxt for CSV
+xyz_data = data[:, :3]  # Assuming the first three columns are XYZ
+
+# Visualize the raw LiDAR data (for inspection)
+fig = plt.figure()
+ax = fig.add_subplot(111, projection='3d')
+ax.scatter(xyz_data[:, 0], xyz_data[:, 1], xyz_data[:, 2], s=1)
+plt.show()
+
+
+# Generate Mesh from LiDAR Data
+
+
+# Convert data into an Open3D point cloud object
+point_cloud = o3d.geometry.PointCloud()
+point_cloud.points = o3d.utility.Vector3dVector(xyz_data)
+
+# Estimate normals for the point cloud (required for surface reconstruction)
+point_cloud.estimate_normals(search_param=o3d.geometry.KDTreeSearchParamHybrid(radius=0.1, max_nn=30))
+
+# Perform surface reconstruction (Poisson method)
+mesh, densities = o3d.geometry.TriangleMesh.create_from_point_cloud_poisson(point_cloud, depth=9)
+
+# Visualize the generated mesh
+o3d.visualization.draw_geometries([mesh])
+
+
+# Animation of Balloon Flight Path
+
+
+# Load the balloon's flight data (assuming each frame is a 3D point cloud for each timestamp)
+flight_data = np.loadtxt('flight_data.txt')  # (x, y, z, time) data
+
+# Function to create a 3D balloon mesh (sphere) at a given position
+def create_balloon_mesh(position, radius=1):
+    u, v = np.mgrid[0:2 * np.pi:100j, 0:np.pi:50j]
+    x = radius * np.cos(u) * np.sin(v) + position[0]
+    y = radius * np.sin(u) * np.sin(v) + position[1]
+    z = radius * np.cos(v) + position[2]
+    
+    balloon_mesh = go.Mesh3d(x=x.flatten(), y=y.flatten(), z=z.flatten(), color='red', opacity=0.5)
+    return balloon_mesh
+
+# Create an initial Plotly figure for animation
+fig = go.Figure()
+
+# Plot the initial LiDAR data and balloon's position
+frame_data = flight_data[0]  # Assume the first row is the first frame
+scatter = go.Scatter3d(x=frame_data[:, 0], y=frame_data[:, 1], z=frame_data[:, 2],
+                       mode='markers', marker=dict(size=3))
+
+fig.add_trace(scatter)
+
+# Add animation frames (one per time step)
+frames = []
+for i in range(1, len(flight_data)):
+    frame_data = flight_data[i]
+    frames.append(go.Frame(data=[go.Scatter3d(x=frame_data[:, 0], y=frame_data[:, 1], z=frame_data[:, 2],
+                                               mode='markers', marker=dict(size=3))], name=str(i)))
+
+fig.frames = frames
+
+# Add balloon (sphere) to each frame
+balloon_frames = []
+for i in range(len(flight_data)):
+    balloon_position = flight_data[i, :3]  # Extract balloon position (x, y, z)
+    balloon_mesh = create_balloon_mesh(balloon_position)
+    balloon_frames.append(go.Frame(data=[balloon_mesh], name=str(i)))
+
+# Combine LiDAR data and balloon into frames
+fig.frames.extend(balloon_frames)
+
+# Update layout for the animation
+fig.update_layout(
+    title="Balloon Flight Path and LiDAR Sensor",
+    scene=dict(
+        xaxis_title="X",
+        yaxis_title="Y",
+        zaxis_title="Z",
+    ),
+    updatemenus=[dict(
+        type="buttons",
+        showactive=False,
+        buttons=[dict(label="Play", method="animate", args=[None, dict(frame=dict(duration=100, redraw=True), fromcurrent=True)])]
+    )]
+)
+
+# Show the animation
+fig.show()
